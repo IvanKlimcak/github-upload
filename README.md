@@ -24,7 +24,7 @@ The package contains functions to tackle all general areas of model development:
 - `outliers_detection`, serves as identification of outliers
 
 ## Predictive power measurements
-- `iv_apply`, calcualates information value for all variables
+- `iv_calc`, calculates information value for all variables
 - `correlation_measures` calculates pearson correlation measures for all variables
 
 # Sampling 
