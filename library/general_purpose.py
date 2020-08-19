@@ -1,6 +1,6 @@
 import pandas as pd
 import warnings 
-from pandas.api.types import is_numeric_dtype
+from pandas.api.types import is_numeric_dtype, is_categorical_dtype, is_datetime64_dtype
 
 def check_y(df,y):
     
@@ -36,10 +36,10 @@ def check_y(df,y):
     if is_numeric_dtype(df[y]):
         df[y] = df[y].apply(lambda x: x if pd.isnull(x) else int(x))
         
-    if list(df[y].drop_duplicates()) != [0,1]:
+    if sorted(list(df[y].drop_duplicates())) != [0,1]:
         raise ValueError(f'Column {y} is not binomial type')
             
-    return df      
+    return df
       
 def x_variables(df, y, x_sel = None, x_skip = None):
     
@@ -64,9 +64,9 @@ def x_variables(df, y, x_sel = None, x_skip = None):
 
     '''
     
-    'Checks input data and response variable'
+    'Check input data'
     df = check_y(df,y)
-    
+   
     'Stores all column names into list'
     x_all = list(set(df.columns).difference([y]))
     
@@ -76,20 +76,12 @@ def x_variables(df, y, x_sel = None, x_skip = None):
          
     'Predetermined selection or elimination'
     if x_sel is not None:
-        
-        if not isinstance(x_sel,list):
-            raise TypeError('Invalid type provided. Supported type is list.')
-        
         if df.columns.isin(x_sel).sum() != len(x_sel):
             raise ValueError('Invalid list of provided variables. Variable not in dataset present.')
         
         return x_sel
         
     elif x_skip is not None:
-        
-        if not isinstance(x_skip,list):
-            raise TypeError('Invalid type provided. Supported type is list.')
-            
         if df.columns.isin(x_skip).sum() != len(x_skip):
             raise ValueError('Invalid list of provided variables. Variable not in dataset present.')
         
@@ -97,3 +89,94 @@ def x_variables(df, y, x_sel = None, x_skip = None):
 
     else:
         return x_all
+     
+def select_numeric_vars(df, y, x_sel = None, x_skip = None):
+    
+    '''
+    Creates a list of numeric variables [int,float]
+    
+    Parameters
+    ----------
+    df: DataFrame
+        Input DataFrame
+    y:  String
+        Response variable
+    x_sel : List, optional
+        Selection of explanatory variables. The default is None.
+    x_skip : List, optional
+        Explanatory variables to be skipped. The default is None.
+
+    Returns
+    -------
+    List
+        List of numeric variables used for modelling.
+    
+    '''
+        
+    'Create selection of variables'
+    x_vars = x_variables(df,y,x_sel,x_skip)
+    
+    'Creates list of numerical values'
+    x_numeric = df[x_vars].apply(pd.to_numeric,errors = 'ignore').select_dtypes(['int64','float64']).columns
+        
+    return x_numeric
+
+def select_categorical_vars(df, y, x_sel = None, x_skip = None):
+    
+    '''
+    Creates a list of categorical variables 
+    
+    Parameters
+    ----------
+    df: DataFrame
+        Input DataFrame
+    y:  String
+        Response variable
+    x_sel : List, optional
+        Selection of explanatory variables. The default is None.
+    x_skip : List, optional
+        Explanatory variables to be skipped. The default is None.
+
+    Returns
+    -------
+    List
+        List of categorical variables used for modelling.
+    '''
+    
+    'Create selection of variables'
+    x_vars = x_variables(df,y,x_sel,x_skip)
+    
+    'Creates list of categorical variables'
+    x_categoric = df[x_vars].apply(pd.to_numeric,errors = 'ignore').select_dtypes(object).columns
+    
+    return x_categoric
+
+def select_datetime_vars(df, y, x_sel = None, x_skip = None):
+    
+    '''
+    Creates a list of datetime variables 
+    
+    Parameters
+    ----------
+    df: DataFrame
+        Input DataFrame
+    y:  String
+        Response variable
+    x_sel : List, optional
+        Selection of explanatory variables. The default is None.
+    x_skip : List, optional
+        Explanatory variables to be skipped. The default is None.
+
+    Returns
+    -------
+    List
+        List of categorical variables used for modelling.
+    '''
+    
+    'Create selection of variables'
+    x_vars = x_variables(df, y, x_sel, x_skip)
+    
+    'Creates a list of datetime variables'
+    x_datetime = [i for i in x_vars if is_datetime64_dtype(df[i])]
+    
+    return x_datetime

@@ -2,7 +2,7 @@ import pandas as pd
 import numpy as np
 from scipy import stats
 from pandas.api.types import is_numeric_dtype, is_categorical_dtype
-from general_purpose import check_y, x_variables
+from general_purpose import select_categorical_vars, select_numeric_vars,check_y, x_variables 
 import matplotlib.pyplot as plt
 import seaborn as sns
 import warnings
@@ -90,14 +90,8 @@ def plot_cat_var(df, y, x_sel = None, x_skip = None, stacked = False, rows = Non
     'Creates a copy of input dataset'
     df = df.copy(deep = True)
     
-    'Checks input data'    
-    df = check_y(df,y)
-    
-    'Creates a list of input variables'
-    x_vars = x_variables(df, y, x_sel, x_skip)
-    
     'Subselects only categorical variable'
-    x_selected = [i for i in x_vars if is_categorical_dtype(df[i])]
+    x_selected = select_categorical_vars(df, y, x_sel, x_skip)
     
     'Empty list'
     if len(x_selected) == 0:
@@ -126,7 +120,7 @@ def plot_cat_var(df, y, x_sel = None, x_skip = None, stacked = False, rows = Non
     plt.tight_layout()
     return plt.show()
 
-def missing_values(df, y, x_sel = None, x_skip = None, threshold = 0):
+def missing_values(df, y, x_sel = None, x_skip = None, threshold = 0, show = True):
     '''
     Calculates missing rates for all variables and returns variables above specified threshold
     
@@ -159,21 +153,32 @@ def missing_values(df, y, x_sel = None, x_skip = None, threshold = 0):
     'Copy of input dataset'
     df = df.copy(deep = True)
     
-    'Check input data'
-    df = check_y(df,y)
+    'Categorical variables'
+    x_cat = select_categorical_vars(df, y, x_sel, x_skip)
+
+    'Numerical variables'
+    x_num = select_numeric_vars(df, y, x_sel, x_skip)
     
-    'Create list of explanatory variables'
-    x_vars = x_variables(df,y,x_sel,x_skip)
+    'Missing rate for numeric'
+    miss_rt_num  = lambda x: x.isnull().sum() / len(x)
+    na_prct_num = df[x_num].apply(miss_rt_num).reset_index(name = 'Missing_rate').rename(columns = {'index': 'Variable'})
     
-    'Missing rate'
-    miss_rt  = lambda x: x.isnull().sum() / len(x)
-    na_prct = df[x_vars].apply(miss_rt).reset_index(name = 'Missing_rate').rename(columns = {'index': 'Variable'})
+    'Missing rate for categorical'
+    na_prct_cat = pd.DataFrame([1-df[i].str.strip().astype(bool).sum() / len(df[i]) for i in x_cat], index = x_cat, columns = ['Missing_rate'])
+    na_prct_cat = na_prct_cat.reset_index().rename(columns = {'index':'Variable'})
+    
+    'Creating output'
+    na_prct = na_prct_num.append(na_prct_cat,ignore_index = True)
     na_prct = na_prct.loc[na_prct['Missing_rate'] > threshold]
-    na_prct['Missing_rate'] = na_prct['Missing_rate'].mul(100).map('{:.2f}'.format) + '%'    
     
-    return na_prct
+    if show:
+        na_prct['Missing_rate'] = na_prct['Missing_rate'].mul(100).map('{:.2f}'.format) + '%'    
+        return na_prct.sort_values('Missing_rate', ascending = False)
+    else:
+        return na_prct.sort_values('Missing_rate', ascending = False)
+
     
-def identical_values(df, y, x_sel = None, x_skip = None, threshold = 0.5):
+def identical_values(df, y, x_sel = None, x_skip = None, threshold = 0.5, show = True):
     
     '''
     Calculates proportion of identical values and returns variables above specified threshold
@@ -217,10 +222,73 @@ def identical_values(df, y, x_sel = None, x_skip = None, threshold = 0.5):
     ident_rt = lambda x: x.value_counts().max() / len(x)
     ident_prct = df[x_vars].apply(ident_rt).reset_index(name = 'Identical_rate').rename(columns = {'index':'Variable'})
     ident_prct = ident_prct.loc[ident_prct['Identical_rate'] > threshold]
-    ident_prct['Identical_rate'] = ident_prct['Identical_rate'].mul(100).map('{:.2f}'.format) + '%'
     
-    return ident_prct
-   
+    if show:
+        ident_prct['Identical_rate'] = ident_prct['Identical_rate'].mul(100).map('{:.2f}'.format) + '%'
+        return ident_prct
+    else:
+        return ident_prct 
+    
+def fill_miss_num(df, y, fill = 'mean'):
+    '''
+    Fill missing values for numeric variables, with supported methods.
+
+    Parameters
+    ----------
+    df : DataFrame
+        Input DataFrame.
+    y : String
+        Response variable.
+    fill : String, optional
+        Method to fill the missing values. The default is 'mean'.
+
+    Returns
+    -------
+    df : DataFrame
+        DataFrame with missing values replacement.
+
+    '''
+    
+    'Currently supported method'
+    methods = ['mean', 'median', 'cat']
+    
+    'Incorrect type of fill'
+    if not isinstance(fill, str):
+        raise TypeError('Incorrect type specified. Please specify string.')
+        
+    'Check if one of the valid method is selected'
+    if len([i for i in methods if i.lower() ==  fill.lower()]) == 0:
+        raise ValueError('Unsupported method selected.')
+    
+    'Creates a copy of input dataset'
+    df = df.copy(deep = True)
+    
+    'Calculates missing values for numeric variables'
+    missings = missing_values(df, y, x_sel = select_numeric_vars(df, y), show = False)
+    
+    'Creates list of missing variables'
+    missing_var_list = missings.iloc[:,0].to_list()
+    
+    'Filling with mean values'
+    if fill.lower() == 'mean':
+    
+        for i in missing_var_list:
+            df[i] = df[i].fillna(df[i].mean())
+    
+    'Filling with median'
+    if fill.lower() == 'median':
+        
+        for i in missing_var_list:
+            df[i] = df[i].fillna(df[i].median())
+    
+    'Filling with category'
+    if fill.lower() == 'cat':
+        
+        for i in missing_var_list:
+            df[i] = df[i].fillna(-999)
+    
+    return df    
+    
 def outlier_detection(df, y, x_sel = None, x_skip = None, method = 'std'):
     
     'Copy of input dataset'
