@@ -1,5 +1,25 @@
 import math
 from predictive_power_measurements import good_bad
+import scorecardpy as sc
+import os
+import sys
+import pandas as pd
+import numpy as np
+from general_purpose import select_numeric_vars
+
+
+dirname = os.path.dirname(__file__)
+dirname.find('library')
+top_dir = dirname[:dirname.find('library')+len('library')]
+if top_dir not in sys.path:
+    sys.path.append(top_dir)
+
+
+df = sc.germancredit()
+
+df_sel = df.loc[:,['credit.amount','age.in.years','creditability']]
+df_sel['creditability'].loc[df_sel['creditability']=='good'] =  0
+df_sel['creditability'].loc[df_sel['creditability']== 'bad'] = 1
 
 def coarse_classifying(df, col, split_num):
     
@@ -132,20 +152,20 @@ def chi2_binning(df, overall_br):
     return df['chi'].sum()
 
 
-def assign_bin(x, cutoffpoints):
+def assign_bin(x, cut_offs):
     
     'Assigns bins based on predefined cut-off points'    
     
-    bin_num = len(cutoffpoints) + 1
+    bin_num = len(cut_offs) + 1
     
-    if x <= cutoffpoints[0]:
+    if x <= cut_offs[0]:
         return 'Bin 0'
-    elif x > cutoffpoints[-1]:
+    elif x > cut_offs[-1]:
         return 'Bin {}'.format(bin_num-1)
     
     else:
         for i in range(0, bin_num - 1):
-            if cutoffpoints[i] < x <= cutoffpoints[i+1]:
+            if cut_offs[i] < x <= cut_offs[i+1]:
                 return 'Bin {}'.format(i+1)
             
 
@@ -189,12 +209,54 @@ def Chi_merge(df, col, y, max_bins = 5, min_binpct = 0, split_num = 100):
     'Final cut-offs'
     group_interval = [sorted(i) for i in group_interval]
     cut_offs = [max(i) for i in group_interval[:-1]]
-    
-    'Applying binning to df'
-    df['col_map_bin'] = df['col_map'].map(lambda x: assign_bin(x, cut_offs)) 
-    
-    'Calculating bad rate for bins'
-    (dict_bad_bin, df_br_bin) = bin_bad_rate(df, 'col_map_bin', y)
-    
+        
+    return cut_offs
 
-    return df    
+
+def bin_num_vars(df, y, x_sel = None, x_skip = None, max_bins = 5, min_binpct = 0):
+    
+    'Select numeric variables'
+    x_num = select_numeric_vars(df, y, x_sel, x_skip)
+    
+    'Overall statistics'
+    overall = good_bad(df, y)
+    
+    bins_num = []
+    IV_list = []
+    for x in x_num:
+        
+        'Calculate cut-offs'
+        cut_offs = Chi_merge(df, x, y, max_bins, min_binpct)
+        cut_offs.insert(0,float('-inf'))
+        cut_offs.append(float('inf'))
+        df_bins = df.groupby(pd.cut(df[x], cut_offs))
+        
+        df_out = pd.DataFrame()
+        
+        df_out['min'] = df_bins[x].min()
+        df_out['max'] = df_bins[x].max()
+        
+        df_out['total'] = df_bins[y].count()
+        df_out['total_rate'] = df_out['total'] / overall.total
+        
+        df_out['bad'] = df_bins[y].sum()
+        df_out['bad_rate'] = df_out['bad'] / df_out['total']
+        
+        df_out['good'] = df_out['total'] - df_out['bad']
+        df_out['good_rate'] = df_out['good'] - df_out['total']
+        
+        df_out['bad_attr'] = df_out['bad'] / overall.bad
+        df_out['good_attr'] = df_out['good'] / overall.good
+        
+        df_out['woe'] = np.log(df_out['bad_attr'] / df_out['good_attr'])
+        df_out['iv_bin'] = (df_out['bad_attr'] - df_out['good_attr']) * df_out['woe']
+        
+        IV_list.append(df_out['iv_bin'].sum().round(3))
+        bins_num.append(df_out)
+    
+    'Information value DataFrame'    
+    IV_df = pd.DataFrame({'col': x_num, 'IV': IV_list})
+    
+    return bins_num, IV_df
+        
+bins_num, IV_df = bin_num_vars(df_sel, 'creditability')
