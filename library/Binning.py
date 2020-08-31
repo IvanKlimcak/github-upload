@@ -1,25 +1,30 @@
 import math
-from predictive_power_measurements import good_bad
-import scorecardpy as sc
-import os
-import sys
 import pandas as pd
 import numpy as np
-from general_purpose import select_numeric_vars
+from general_purpose import select_numeric_vars, select_categorical_vars
+    
+def good_bad(df, y):
+    
+    '''
+    Calculates number of good and bad cases for response binary variable.
+    
+    Parameters
+    ----------
+    df: DataFrame
+        Input DataFrama
+    y:  String
+        Response binary variable
+        
+    Returns
+    ------
+    Series
+        Number of bad, good and total cases
+    '''
+        
+    good_bad = {'bad': (sum(df[y])), 'good' : (len(df[y]) - sum(df[y])), 'total': (len(df[y]))}
 
-
-dirname = os.path.dirname(__file__)
-dirname.find('library')
-top_dir = dirname[:dirname.find('library')+len('library')]
-if top_dir not in sys.path:
-    sys.path.append(top_dir)
-
-
-df = sc.germancredit()
-
-df_sel = df.loc[:,['credit.amount','age.in.years','creditability']]
-df_sel['creditability'].loc[df_sel['creditability']=='good'] =  0
-df_sel['creditability'].loc[df_sel['creditability']== 'bad'] = 1
+    return pd.Series(good_bad)
+    
 
 def coarse_classifying(df, col, split_num):
     
@@ -170,6 +175,30 @@ def assign_bin(x, cut_offs):
             
 
 def Chi_merge(df, col, y, max_bins = 5, min_binpct = 0, split_num = 100):
+    '''
+    Creates binning for a given variable 
+
+    Parameters
+    ----------
+    df : DataFrame
+        Input DataFrame.
+    col : String
+        Explanatory variable name.
+    y : String
+        Response variable.
+    max_bins : Int, optional
+        Maximum number of available bins. The default is 5.
+    min_binpct : Float, optional
+        Minimum proportion within bin. The default is 0.
+    split_num : Int, optional
+        Number of distinct values for variable. The default is 100.
+
+    Returns
+    -------
+    cut_offs : List
+        Cut-off points for binning.
+
+    '''
     
     'Copy of input dataset'
     df = df.copy(deep = True)
@@ -215,6 +244,37 @@ def Chi_merge(df, col, y, max_bins = 5, min_binpct = 0, split_num = 100):
 
 def bin_num_vars(df, y, x_sel = None, x_skip = None, max_bins = 5, min_binpct = 0):
     
+    '''
+    Numeric variables binning 
+    
+    Parameters 
+    ---------
+    df: DataFrame
+        Input DataFrame
+    y:  String
+        Response variable
+    x_sel: List
+        Custom selection of explanatory variables
+    x_skip: List
+        Custom elimination of explanatory variables
+    max_bins: Int
+        Maximum number of available bins
+    min_binpct Float
+        Minimum proportion within the bin
+        
+    Returns
+    ------
+    bins_num: List
+        Details of binning per variable
+    IV_num: DataFrame
+        DataFrame with information values
+    Df: DataFrame
+        Output DataFrame with WOE values
+    '''
+    
+    'Copy of input dataset'
+    df = df.copy(deep = True)
+    
     'Select numeric variables'
     x_num = select_numeric_vars(df, y, x_sel, x_skip)
     
@@ -222,7 +282,8 @@ def bin_num_vars(df, y, x_sel = None, x_skip = None, max_bins = 5, min_binpct = 
     overall = good_bad(df, y)
     
     bins_num = []
-    IV_list = []
+    IV_list_num = []
+    
     for x in x_num:
         
         'Calculate cut-offs'
@@ -237,26 +298,138 @@ def bin_num_vars(df, y, x_sel = None, x_skip = None, max_bins = 5, min_binpct = 
         df_out['max'] = df_bins[x].max()
         
         df_out['total'] = df_bins[y].count()
+        df_out['total_cum'] = df_out['total'].cumsum()
         df_out['total_rate'] = df_out['total'] / overall.total
         
         df_out['bad'] = df_bins[y].sum()
+        df_out['bad_cum'] = df_out['bad'].cumsum()
         df_out['bad_rate'] = df_out['bad'] / df_out['total']
         
         df_out['good'] = df_out['total'] - df_out['bad']
-        df_out['good_rate'] = df_out['good'] - df_out['total']
+        df_out['good_cum'] = df_out['good'].cumsum()
+        df_out['good_rate'] = df_out['good'] / df_out['total']
         
         df_out['bad_attr'] = df_out['bad'] / overall.bad
         df_out['good_attr'] = df_out['good'] / overall.good
         
         df_out['woe'] = np.log(df_out['bad_attr'] / df_out['good_attr'])
         df_out['iv_bin'] = (df_out['bad_attr'] - df_out['good_attr']) * df_out['woe']
+        df_out['IV'] = df_out['iv_bin'].sum().round(3)
         
-        IV_list.append(df_out['iv_bin'].sum().round(3))
+        df[x] = df[x].map(df_out['woe'])
+        
+        IV_list_num.append(df_out['IV'].sum().round(3))
         bins_num.append(df_out)
     
     'Information value DataFrame'    
-    IV_df = pd.DataFrame({'col': x_num, 'IV': IV_list})
+    IV_num = pd.DataFrame({'col': x_num, 'IV': IV_list_num}).sort_values(by= 'IV', ascending = False)
     
-    return bins_num, IV_df
+    return bins_num, IV_num, df
+
+def bin_cat_vars(df, y, x_sel = None, x_skip = None, max_bins = 5, min_binpct = 0):
+    
+    '''
+    Categorical variables binning
+    Parameters
+    ----------
+    df: DataFrame
+        Input DataFrame
+    y:  String
+        Response variable
+    x_sel: List
+        Custom selection of explanatory variables
+    y_skip: List
+        Custom elimination of explanatory variables
+    max_bins: Int
+        Maximum number of available bins. Default is 5
+    min_binpct: Float
+        Minimum proportion within the bin. Default is 0
+    
+    Returns
+    -------
+    bins_num: List
+        Details of binning per variable
+    IV_num: DataFrame
+        DataFrame with information values
+    Df: DataFrame
+        Output DataFrame with WOE values
+    
+    '''
+    
+    'Copy of input DataFrame'
+    df = df.copy(deep = True)
+    
+    'Select categorical variables'
+    x_cat = select_categorical_vars(df, y)
+    
+    'Overall statistics'
+    overall = good_bad(df, y)
+    
+    bins_cat = []
+    IV_list_cat = []
+    
+    for x in x_cat:
         
-bins_num, IV_df = bin_num_vars(df_sel, 'creditability')
+        'Calculate IV for categoric variables'
+        df_bins = df.groupby([x])
+    
+        df_out  = pd.DataFrame()
+        
+        df_out['total'] = df_bins[y].count()
+        df_out['total_cum'] = df_out['total'].cumsum()
+        df_out['total_rate'] = df_out['total'] / overall.total
+        
+        df_out['bad'] = df_bins[y].sum()
+        df_out['bad_cum'] = df_out['bad'].cumsum()
+        df_out['bad_rate'] = df_out['bad'] / overall.bad
+        
+        df_out['good'] = df_out['total'] - df_out['bad']
+        df_out['good_cum'] = df_out['good'].cumsum()
+        df_out['good_rate'] = df_out['good'] / df_out['total']
+        
+        df_out['bad_attr'] = df_out['bad'] / overall.bad
+        df_out['good_attr'] = df_out['good'] / overall.good
+        
+        df_out['woe'] = np.log(df_out['bad_attr'] / df_out['good_attr'])
+        df_out['iv_bin'] = (df_out['bad_attr'] - df_out['good_attr']) * df_out['woe']
+        df_out['IV'] = df_out['iv_bin'].sum().round(3)
+        
+        df[x] = df[x].map(df_out['woe'])
+        
+        IV_list_cat.append(df_out['iv_bin'].sum().round(3))
+        bins_cat.append(df_out)
+    
+    'Information value DataFrame'
+    IV_cat = pd.DataFrame({'col':x_cat, 'IV': IV_list_cat}).sort_values(by = 'IV', ascending = False)
+    
+    return bins_cat, IV_cat, df
+     
+def woe_monotonic(bin_df):
+    
+    'Variables list'
+    col_name = [i.index.name for i in bin_df]
+    
+    woe_mon = []
+    
+    for i in range(len(col_name)):
+        w = bin_df[i].woe.to_list()
+        
+        if len(w) == 2:
+            woe_nm = [(w[i] > w[i+1]) for i in range(len(w)-1)]
+        
+            if True in woe_nm:
+                woe_mon.append('False')
+            else:
+                woe_mon.append('True')
+    
+        else:
+            woe_nm = [((w[i] > w[i+1] and w[i] > w[i-1]) or (w[i] < w[i-1] and w[i] < w[i+1])) for i in range(len(w)-1)]
+        
+            if True in woe_nm:
+                woe_mon.append('False')
+            else:
+                woe_mon.append('True')
+        
+    Monotonic_df = pd.DataFrame({'col': col_name, 'Monotonic': woe_mon})
+    
+    return Monotonic_df

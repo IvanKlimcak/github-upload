@@ -1,131 +1,13 @@
 import pandas as pd
 import numpy as np
-from general_purpose import check_y, x_variables
+from general_purpose import x_variables
+from Binning import *
+import scorecardpy as sc
 
-def good_bad(df, y):
-    
-    '''
-    Calculates number of good and bad cases for response binary variable.
-    
-    Parameters
-    ----------
-    df: DataFrame
-        Input DataFrama
-    y:  String
-        Response binary variable
-        
-    Returns
-    ------
-    Series
-        Number of bad, good and total cases
-    '''
-        
-    good_bad = {'bad': (sum(df[y])), 'good' : (len(df[y]) - sum(df[y])), 'total': (len(df[y]))}
+df = sc.germancredit()
+df['creditability'].loc[df['creditability']=='good'] =  0
+df['creditability'].loc[df['creditability']== 'bad'] = 1
 
-    return pd.Series(good_bad)
-
-def _iv_resolution(iv):
-    
-    '''
-    Categorize information value results.
-    
-    Returns
-    -------
-    String 
-        Predictive power commentary
-    
-    '''
-    
-    if iv < 0.02 :
-        return 'Not useful'
-    elif iv <= 0.1:
-        return 'Weak predictive power'
-    elif iv <= 0.3:
-        return 'Medium predictive power'
-    elif iv <= 0.5:
-        return 'Strong predictive power'
-    else:
-        return 'Suspicious predictive power'
-
-def iv(df, x, y):
-    
-    '''
-    Information value
-    
-    Parameters
-    ----------
-    df: DataFrame
-        Input DataFrame
-    x:  String
-        Name of explanatory variable
-    y:  String
-        Name of response variable
-    
-    Returns
-    -------
-    Float
-        Information value
-        
-    '''
-    
-    iv_df = pd.DataFrame(df.groupby(x).apply(good_bad,y = y).replace(0,0.01))
-        
-    iv_df['bad_D'] =  (iv_df['bad'] / sum(iv_df['bad']))
-    iv_df['good_D'] = (iv_df['good'] / sum(iv_df['good']))
-    
-    iv_df['bad_cum'] = (iv_df['bad']).cumsum()
-    iv_df['good_cum'] = (iv_df['good']).cumsum()
-        
-    iv_df['IV'] = (iv_df['good_D'] - iv_df['bad_D']) * np.log(iv_df['good_D'] / iv_df['bad_D'])
-    
-    return iv_df['IV'].sum()
-    
-def iv_calc(df, y, x_sel = None, x_skip = None, order = True):
-    
-    '''
-    Calculates information value for selected response variable
-    
-    Parameters
-    ----------
-    df: DataFrame
-        Input DataFrame
-    y:  String 
-        Name of response variable
-    x_sel: List
-            List of selected variables
-    x_skip: List
-              List of variables to be skipped
-    order: Bool
-              Sort by information value from highest to lowest
-    
-    Returns
-    -------
-    DataFrame
-        Output DataFrame with Information value
-    
-    '''
-    
-    'Creates a copy of input dataset'
-    df = df.copy(deep = True)
-    
-    'Checks dependent variable'
-    df = check_y(df,y)
-    
-    'List of independent variables'
-    x_vars  = x_variables(df,y,x_sel,x_skip)
-
-    'Creates output dataset'    
-    out_df = pd.DataFrame({'variable' : x_vars
-                             ,'information_value' : [round(iv(df,i,y),6) for i in x_vars]})
-    
-    'Adding resolution'
-    out_df['predictive_power'] = list(map(_iv_resolution,out_df['information_value']))
-    
-    'Ordering'
-    if order:
-        out_df = out_df.sort_values(by = 'information_value',ascending=False)
-    
-    return out_df
 
 def correlation_measures(df, y, x_sel = None, x_skip = None, order = True):
     
@@ -138,13 +20,9 @@ def correlation_measures(df, y, x_sel = None, x_skip = None, order = True):
         Input DataFrame.
     y:  String
         Name of response variable.
-    x_sel: List
-           List of selected variables. Default is None.
-    x_skip: List
-            List of variables to be skipped. Default is None.
-    
+    order: Bool.optional
+        Ordered correlation
     '''
-        
     def _corr_evaluation(x):
         if abs(x) >= 0.7:
             return "High correlation"
@@ -153,28 +31,69 @@ def correlation_measures(df, y, x_sel = None, x_skip = None, order = True):
         else:
             return "Low correlation"
     
-    'Check inputs'
-    df = check_y(df, y)
-    
-    'Creates a list of variables for correlation analysis'
-    x = x_variables(df,y,x_sel,x_skip)
-    
     'Creates a copy of input file'
     df = df.copy(deep = True)
-    
-    'Calculates correlation'
-    corr_mat = df[x].corr()
+ 
+    'Select variables'
+    x_vars = x_variables(df, y, x_sel, x_skip)
+     
+    'Calculates correlation for numeric variables'
+    corr_mat = df[x_vars].corr(method = 'pearson')
 
     'Creates outputs for correlation'
-    corr_mat = corr_mat.where(np.triu(np.ones(corr_mat.shape).astype(bool)))    
-    corr_mat = corr_mat.stack().reset_index()
-    corr_mat.columns = ['variable_1','variable_2','corr_coef']
-    corr_mat = corr_mat.loc[corr_mat['variable_1'] != corr_mat['variable_2']]
-    corr_mat['evaluation'] = list(map(_corr_evaluation,corr_mat['corr_coef']))
-    corr_mat['corr_coef'] = corr_mat['corr_coef'].mul(100).map('{:.2f}'.format) + '%'
-
-    if order:
-        corr_mat = corr_mat.sort_values(by='corr_coef',ascending = False)
+    corr_eval = corr_mat.where(np.triu(np.ones(corr_mat.shape).astype(bool)))    
+    corr_eval = corr_mat.stack().reset_index()
+    corr_eval.columns = ['variable_1','variable_2','corr_coef']
+    corr_eval = corr_eval.loc[corr_eval['variable_1'] != corr_eval['variable_2']]
+    corr_eval['evaluation'] = list(map(_corr_evaluation,corr_eval['corr_coef']))
     
-    return corr_mat
+    if order:
+        corr_eval = corr_eval.sort_values(by='corr_coef',ascending = False)    
+    
+    corr_eval['corr_coef'] = corr_eval['corr_coef'].mul(100).map('{:.2f}'.format) + '%'
 
+    return corr_eval
+
+def forward_selection_pvalues(x_train, y_train):
+    '''
+    Forward selection of variables based on p-value in logistic regression.
+    
+    Parameters
+    ----------
+    x_train : DataFrame
+        Training DataFrame with explanatory variables.
+    y_train : DataFrame
+        Training DataFrame with response variable.
+
+    Returns
+    -------
+    col_list : List
+        Statistically significant variables.
+
+    '''
+    
+    'Select explanatory variables'
+    x_vars = set(x_train.columns)
+    
+    col_list = []
+    'Calculate forward logistic regression'
+    for x in x_vars:
+        
+        col_list.append(x)
+        x_train_s = sm.add_constant(x_train.loc[:,col_list])
+        lr = sm.Logit(y_train.astype(float),x_train_s.astype(float))
+        lr = lr.fit()
+        
+        for i,j in zip(lr.pvalues.index[1:],lr.pvalues.values[1:]):
+            if j > 0.05:
+                col_list.remove(i)
+                
+    'Regression with statistically significant variables'
+    x_train_sv = sm.add_constant(x_train.loc[:,col_list])
+    lr_sel = sm.Logit(y_train.astype(float), x_train_sv.astype(float))
+    lr_sel = lr_sel.fit()
+    
+    print(lr_sel.summary2())
+    
+    return col_list    
+        
